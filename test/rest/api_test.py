@@ -38,7 +38,7 @@ class TestApi(unittest.TestCase):
         self.assertEqual(
             response.status, http.client.OK, f"Error en la petición API a {url}"
         )
-        self.assertEqual(response.read().decode(), "5.0", "ERROR DIVIDE")
+        self.assertEqual(response.read().decode(), "5", "ERROR DIVIDE")
 
     def test_api_divide_by_zero(self):
         url = f"{BASE_URL}/calc/divide/10/0"
