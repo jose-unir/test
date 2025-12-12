@@ -2,6 +2,7 @@ import http.client
 import os
 import unittest
 from urllib.request import urlopen
+from urllib.error import HTTPError
 
 import pytest
 
@@ -45,7 +46,7 @@ class TestApi(unittest.TestCase):
         try:
             _ = urlopen(url, timeout=DEFAULT_TIMEOUT)
             self.fail("Se espera HTTP 406 para división por cero")
-        except Exception as e:
+        except HTTPError as e:
             status_code = getattr(e, "code", None)
             self.assertEqual(
                 status_code,
