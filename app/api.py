@@ -1,7 +1,5 @@
 import http.client
-
 from flask import Flask
-
 from app import util
 from app.calc import Calculator
 
@@ -69,23 +67,20 @@ def divide(op_1, op_2):
 
         result = CALCULATOR.divide(num_1, num_2)
 
-    
-    # Formateo: si es entero exacto -> sin decimales
-    try:
-        as_float = float(result)
-        body = (
-            str(int(as_float))
-            if as_float.is_integer()
-            else str(as_float)
-        )
-        
+        # Formateo: si es entero exacto -> sin decimales
+        try:
+            as_float = float(result)
+            body = (
+                str(int(as_float))
+                if as_float.is_integer()
+                else str(as_float)
+            )
         except Exception:
             body = str(result)
 
         return (body, http.client.OK, HEADERS)
 
     except ZeroDivisionError:
-        # Por si la lógica interna lanza la excepción
         return (
             "Division by zero not allowed",
             http.client.NOT_ACCEPTABLE,
@@ -93,5 +88,4 @@ def divide(op_1, op_2):
         )
 
     except TypeError as exc:
-        # Conversión/entrada inválida
         return (str(exc), http.client.BAD_REQUEST, HEADERS)
