@@ -31,12 +31,12 @@ class TestCalculate(unittest.TestCase):
         cases = [(10, 6, 4), (256, 258, -2), (-1, 0, -1), (0, 0, 0), (5, 5, 0)]
         for a, b, expected in cases:
             with self.subTest(a=a, b=b):
-                self.assertEqual(self.calc.substract(a, b), expected)
+                self.assertEqual(self.calc.subtract(a, b), expected)
 
     def test_subtract_type_error(self):
         for a, b in [("0", 0), (0, "0")]:
             with self.subTest(a=a, b=b):
-                self.assertRaises(TypeError, self.calc.substract, a, b)
+                self.assertRaises(TypeError, self.calc.subtract, a, b)
 
     def test_multiply_ok(self):
         cases = [(2, 2, 4), (1, 0, 0), (-1, 0, 0), (-1, 2, -2), (3, -3, -9), (-2, -3, 6)]
