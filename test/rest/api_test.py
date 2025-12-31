@@ -1,6 +1,6 @@
 import http.client
 import unittest
-from urllib.request import urlopen
+from urllib.request import build_opener, HTTPHandler, HTTPSHandler
 from urllib.error import HTTPError, URLError
 from urllib.parse import urlparse
 import pytest
@@ -10,7 +10,7 @@ BASE_URL_MOCK = "http://localhost:9090"
 DEFAULT_TIMEOUT = 2  # in secs
 
 _ALLOWED_SCHEMES = {"http", "https"}
-
+_opener = build_opener(HTTPHandler(), HTTPSHandler())
 
 def _validated_url(url: str) -> str:
     """Validate URL scheme and structure to avoid file:/ or custom schemes."""
@@ -26,7 +26,7 @@ def _validated_url(url: str) -> str:
 def _safe_urlopen(url: str, timeout: float = DEFAULT_TIMEOUT):
     """Open a URL safely after validating allowed schemes."""
     safe = _validated_url(url)
-    return urlopen(safe, timeout=timeout)
+    return _opener.open(safe, timeout=timeout)
 
 
 @pytest.mark.api
