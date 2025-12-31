@@ -72,7 +72,12 @@ def divide(op_1, op_2):
         # Formateo: si es entero exacto -> sin decimales
         try:
             as_float = float(result)
-            body = str(int(as_float)) if as_float.is_integer() else str(as_float)
+            body = (
+                str(int(as_float)) 
+                if as_float.is_integer() 
+                else str(as_float)
+            )
+            
         except Exception:
             body = str(result)
 
