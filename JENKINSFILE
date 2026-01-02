@@ -1,61 +1,187 @@
 pipeline {
-    agent any
+  agent none
 
-     stages {
-        stage('Get Code') {
-            steps {
-                // Obtener código del repo
-                git 'https://github.com/jose-unir/test.git'
-                sh 'ls -la'
-                echo "${WORKSPACE}"
-            }
-        }
-    
-        stage('Build') {
-           steps {
-              echo 'Eyyy, esto es Python. No hay que compilar nada!!!'
-           }
-        }
-        
-        stage('Tests')
-        {
-            parallel
-            {
+  stages {
 
-                stage('Unit') {
-                            steps {
-                                catchError(buildResult: 'UNSTABLE', stageResult: 'FAILURE') {
-                                    sh '''
-                                        export PYTHONPATH=.
-                                        pytest --junitxml=result-unit.xml test/unit
-                                    '''
-                                }
-                            }
-                }
-                
-                        
-                stage('Rest') {
-                    steps {
-                        catchError(buildResult: 'UNSTABLE', stageResult: 'FAILURE') {
-                            sh '''
-                                export FLASK_APP=app/api.py
-                                nohup flask run &
-                                nohup java -jar /home/josito/.git/helloworld/test/wiremock/wiremock-standalone-3.13.2.jar --port 9090 --root-dir /home/josito/.git/helloworld/test/wiremock &
-                                
-                               sleep 10
-                                
-                                pytest --junitxml=result-rest.xml test/rest
-                            '''
-                        }
-                    }
-                }        
+    stage('Get Code') {
+      agent { label 'Linux' }
+      steps {
+        sh '''
+          whoami
+          hostname
+          echo "${WORKSPACE}"
+        '''
+        git branch: 'master', url: 'https://github.com/jose-unir/test.git'
+        stash name: 'source', includes: '**/*', excludes: '**/.git/**'
+      }
+    }
+
+    stage('Static & Security') {
+      parallel {
+
+        stage('Static') {
+          agent { label 'Linux' }
+          steps {
+            unstash 'source'
+            sh '''
+              whoami
+              hostname
+              echo "${WORKSPACE}"
+              # Formato pylint para Warnings NG:
+              flake8 --exit-zero --format=pylint app > flake8.out
+            '''
+            catchError(buildResult: 'UNSTABLE', stageResult: 'UNSTABLE') {
+              recordIssues(
+                id: 'flake8',
+                qualityGates: [
+                  [type: 'TOTAL', threshold: 8,  criticality: 'UNSTABLE'],
+                  [type: 'TOTAL', threshold: 10, criticality: 'FAILURE']
+                ],
+                sourceCodeRetention: 'LAST_BUILD',
+                tools: [pyLint(pattern: 'flake8.out')],
+                enabledForFailure: true
+              )
             }
+            stash name: 'static-report', includes: 'flake8.out', allowEmpty: true
+          }
         }
-        
-        stage ('Results') {
-            steps {
-                junit 'result*.xml'
+
+        stage('Security') {
+          agent { label 'Linux2' }
+          steps {
+            unstash 'source'
+            sh '''
+              whoami
+              hostname
+              echo "${WORKSPACE}"
+              # Bandit devuelve 1 si hay hallazgos; no queremos que sh falle por eso:
+              bandit -r . -f custom -o bandit.out --msg-template "{abspath}:{line}: [{test_id}] {msg}" || true
+            '''
+            catchError(buildResult: 'UNSTABLE', stageResult: 'UNSTABLE') {
+              recordIssues(
+                id: 'bandit',
+                qualityGates: [
+                  [type: 'TOTAL', threshold: 2,  criticality: 'UNSTABLE'],
+                  [type: 'TOTAL', threshold: 4,  criticality: 'FAILURE']
+                ],
+                sourceCodeRetention: 'LAST_BUILD',
+                tools: [pyLint(pattern: 'bandit.out')],
+                enabledForFailure: true
+              )
             }
-        }        
-     }
+            stash name: 'security-report', includes: 'bandit.out', allowEmpty: true
+          }
+        }
+
+      } // parallel
+    } // stage('Static & Security')
+
+    stage('Tests') {
+      parallel {
+
+        stage('Unit & Coverage') {
+          agent { label 'Linux2' }
+          steps {
+            sh '''
+              whoami
+              hostname
+              echo "${WORKSPACE}"
+            '''
+            unstash 'source'
+            catchError(buildResult: 'UNSTABLE', stageResult: 'UNSTABLE') {
+              sh '''
+                export PYTHONPATH=.
+                python3 -m coverage run --branch --source=app --omit=app/__init__.py,app/api.py -m pytest test/unit --junitxml=result-unit.xml
+                python3 -m coverage xml -o coverage.xml
+              '''
+              recordCoverage(
+                qualityGates: [
+                  [metric: 'LINE',   threshold: 95.0, criticality: 'UNSTABLE'],
+                  [metric: 'LINE',   threshold: 85.0, criticality: 'FAILURE'],
+                  [metric: 'BRANCH', threshold: 90.0, criticality: 'UNSTABLE'],
+                  [metric: 'BRANCH', threshold: 80.0, criticality: 'FAILURE']
+                ],
+                tools: [[parser: 'COBERTURA', pattern: 'coverage.xml']],
+                enabledForFailure: true
+              )
+            }
+            junit allowEmptyResults: true, testResults: 'result-unit.xml'
+            stash name: 'unit-report', includes: 'result-unit.xml,coverage.xml', allowEmpty: true
+          }
+        }
+
+        stage('Rest') {
+          agent { label 'Linux3' }
+          steps {
+            sh '''
+              whoami
+              hostname
+              echo "${WORKSPACE}"
+            '''
+            unstash 'source'
+            sh '''
+              set -e
+              export PYTHONPATH=.
+              export FLASK_APP=app/api.py
+
+              # Arranca Flask (puerto 5000)
+              flask run --port 5000 > flask.log 2>&1 &
+              FLASK_PID=$!
+              sleep 5
+
+              # Arranca WireMock SOLO para los tests REST que lo usan (sqrt en 9090)
+              java -jar /home/josito/.git/helloworld/test/wiremock/wiremock-standalone-3.13.2.jar \
+                --port 9090 --root-dir /home/josito/.git/helloworld/test/wiremock > wiremock.log 2>&1 &
+              WIREMOCK_PID=$!
+
+              # Guarda PIDs para limpieza
+              echo $FLASK_PID > flask.pid
+              echo $WIREMOCK_PID > wiremock.pid
+
+              # Ejecuta tests REST
+              sleep 5
+              pytest --junitxml=result-rest.xml test/rest
+            '''
+            junit allowEmptyResults: true, testResults: 'result-rest.xml'
+            stash name: 'rest-report', includes: 'result-rest.xml', allowEmpty: true
+          }
+          post {
+            always {
+              sh '''
+                if [ -f flask.pid ]; then kill "$(cat flask.pid)" 2>/dev/null || true; rm -f flask.pid; fi
+                if [ -f wiremock.pid ]; then kill "$(cat wiremock.pid)" 2>/dev/null || true; rm -f wiremock.pid; fi
+              '''
+            }
+          }
+        }
+
+        stage('Performance') {
+          agent { label 'Linux2' }
+          steps {
+            unstash 'source'
+            catchError(buildResult: 'UNSTABLE', stageResult: 'UNSTABLE') {
+              sh '''
+              jmeter -n -t test/jmeter/flask.jmx -l flask.jtl
+              '''
+              perfReport sourceDataFiles: 'flask.jtl'
+            }
+          }
+        }
+
+      } // parallel
+    } // stage('Tests')
+
+  } // stages
+
+  post {
+    always {
+      script {
+        ['Linux', 'Linux2', 'Linux3'].each { labelName ->
+          node(labelName) {
+            cleanWs()
+          }
+        }
+      }
+    }
+  }
 }
